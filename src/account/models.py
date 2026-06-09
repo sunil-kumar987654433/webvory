@@ -5,7 +5,9 @@ import uuid
 from datetime import datetime, date, timezone
 from enum import Enum
 
-
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from cust_orders.models import Order
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -27,6 +29,8 @@ class Customer(Base):
         DateTime(timezone=True), 
         default=lambda: datetime.now(timezone.utc), 
         onupdate=lambda: datetime.now(timezone.utc))
-    
+
+    orders: Mapped[list['Order']] = relationship(back_populates='customer', cascade='all, delete-orphan')
+
     def __repr__(self):
         return f"<Customer (id: {self.user_id})>"
