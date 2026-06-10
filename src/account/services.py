@@ -15,6 +15,7 @@ from pydantic import EmailStr
 from src.config import Config
 import logging
 import random
+
 class CustomerService:
     BATCH_SIZE = 5000
 
@@ -38,6 +39,7 @@ class CustomerService:
     
 
     async def CreateNewUser(self, session: AsyncSession):
+        
         t1 = time.time()
         c=0
         total_customer = await session.scalar(select(func.count(Customer.user_id)))

@@ -1,28 +1,42 @@
-from datetime import datetime, timedelta, timezone
 import uuid
 import time
+import logging
+import secrets, random
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, timedelta
 from faker import Faker
-
+from fastapi import HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from src.cust_orders.schema import BussiessTrends1, BussiessTrends2, SpendingByCustomer
-fake = Faker('en_IN')
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, insert, func, update, bindparam, text, asc
 from threading import Thread
 from src.account.models import Customer
 from .models import Order, OrderStatus
-from fastapi import HTTPException, status, Depends, Request
-from fastapi.responses import JSONResponse
-from pydantic import EmailStr
+
 from src.config import Config
-import logging
-import secrets, random
-from decimal import Decimal, ROUND_HALF_UP
+
+fake = Faker('en_IN')
 
 
 class OrderService:
     BATCH_SIZE = 5000
 
+    async def is_check_order_exist(self, session: AsyncSession):
+        total_order = await session.scalar(
+            select(func.count(Order.order_id))
+        )
+        if total_order == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No orders found.",
+            )
+        return total_order
+    
+
     async def PurchaseOrdersSpends(self, request: Request, spending_type: SpendingByCustomer, page: int, page_size: int, session: AsyncSession):
+        await self.is_check_order_exist(session)
         order = "desc" if spending_type == SpendingByCustomer.desc else "asc"
         query = text(
             f"""
@@ -46,6 +60,8 @@ class OrderService:
 
 
     async def BussinessRevenueTrends(self, trends1: BussiessTrends1, trends2: BussiessTrends2, request, session):
+        await self.is_check_order_exist(session)
+
         odr1 = 'year' if trends1 == 'year' else 'month'
         odr2 = 'month' if trends2 == 'month' else None
 
@@ -76,6 +92,7 @@ class OrderService:
         query = text("""
             select COALESCE(sum(user_total_purchasing), 0.00), COALESCE(sum(total_repeated_cust), 0)  from (select sum(amount) as user_total_purchasing, customer_uid, count(customer_uid) as total_repeated_cust, count(order_id) from orders group by customer_uid having count(order_id) > 1) as subquery
                      """)
+        await self.is_check_order_exist(session)
         result = await session.execute(query)
         revenue, total_repeated_cust = result.one()
         
@@ -90,24 +107,31 @@ class OrderService:
 
 
     async def FetchAverageOrdersAmount(self, request, session):
+        await self.is_check_order_exist(session)
+
         result =  (await session.scalar(select(func.avg(Order.amount)))) or Decimal('0.00')
         return result.quantize(Decimal("0.01"))
     
     async def FetchTotalOrdersRefund(self, request, session):
+        await self.is_check_order_exist(session)
         result =  (await session.scalar(select(func.sum(Order.amount)).where(Order.status == OrderStatus.refunded))) or Decimal('0.00')
         return result.quantize(Decimal("0.01"))
     async def FetchNetOrdersRevenue(self, request, session):
+        await self.is_check_order_exist(session)
         result =  (await session.scalar(select(func.sum(Order.amount- Order.refund_amount)))) or Decimal('0.00')
         return result.quantize(Decimal("0.01"))
 
     async def FetchTotalOrdersRevenue(self, request, session):
+        await self.is_check_order_exist(session)
         result =  (await session.scalar(select(func.sum(Order.amount)))) or Decimal('0.00')
         return result.quantize(Decimal("0.01"))
     
     async def FetchTotalOrders(self, request, session):
+        await self.is_check_order_exist(session)
         return (await session.scalar(select(func.count(Order.order_id)))) or 0
     
     async def FetchAllOrders(self, request, page, page_size, session):
+        await self.is_check_order_exist(session)
         current_url = str(request.url)
         current_path = str(request.url).split("?")[0]
         query = text("""
@@ -127,6 +151,7 @@ class OrderService:
     
 
     async def FetchAllCancelOrdersDetail(self,request: Request, page: int, page_size: int, session: AsyncSession):
+        await self.is_check_order_exist(session)
         current_url = str(request.url)
         current_path = str(request.url).split("?")[0]
         query = text("""
@@ -156,19 +181,13 @@ class OrderService:
             status_code=status.HTTP_200_OK
         )
     
+    
     async def CancelOrderGenerateRefund(
         self,
         session: AsyncSession,
     ):
         t1 = time.time()
-        total_order = await session.scalar(
-            select(func.count(Order.order_id))
-        )
-        if total_order == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No orders found.",
-            )
+        await self.is_check_order_exist(session)
         result = await session.execute(
             select(
                 Order.order_id,
