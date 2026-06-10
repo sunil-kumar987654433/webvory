@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     JWT_ALGITHAM: SecretStr
     REDIS_HOST: str = 'localhost'
     REDIS_PORT: int = 6379
+    POSTGRES_PASSWORD: str
+    POSTGRES_USER: str
+    POSTGRES_DB: str
 
     model_config = SettingsConfigDict(
         env_file='.env',

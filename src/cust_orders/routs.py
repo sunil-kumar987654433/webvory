@@ -1,16 +1,15 @@
 import json
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
-
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.redis import redis_client
 from src.db.main import get_session
 from .services import OrderService
 from .schema import BussiessTrends1, BussiessTrends2, OrderResponse, SpendingByCustomer
-from sqlalchemy.ext.asyncio import AsyncSession
+
 order_router = APIRouter()
 order_service = OrderService()
-from src.redis import redis_client
 
-import uuid
 
 @order_router.post("/generate-order")
 async def generate_order( session: AsyncSession = Depends(get_session)):

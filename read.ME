@@ -1,0 +1,53 @@
+------setup project------
+git clone git@github.com:sunil-kumar987654433/webvory.git
+
+-------------going into project-----
+cd webvory
+
+------create venv----into linux os-----
+python3 -m venv venv
+
+
+----activate venv------
+source venv.bin/activate
+
+-------------install package-----
+pip install -r req.txt
+
+-----install redis server in your linux os if you have linux os----
+https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/install-redis-on-linux/
+
+else
+----according to your os select redis server----
+https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/
+
+
+----create database----
+database credentials copy from .env file
+------update in .env file----
+REDIS_HOST=localhost
+----run server , if you want to run project at local server-----
+fastapi dev src/
+--------------------------------------------
+
+
+
+
+-----else---
+----want to setup at docker run below 2 command , below create database and create table automatically----
+change -->REDIS_HOST=redis
+change hostname also in DATABASE_URL--> db
+----
+
+
+----- build and run docker use below command----
+sudo docker compose up --build -d
+
+-----for close ----docker----
+sudo docker compose down
+
+
+
+
+-----if you want delete volume also----then use below command----
+sudo docker compose down -v
