@@ -6,7 +6,7 @@ from typing import Annotated, AsyncGenerator
 
 engine = create_async_engine(
     url=Config.DATABASE_URL,
-    echo=True
+    # echo=True
     )
 
 
