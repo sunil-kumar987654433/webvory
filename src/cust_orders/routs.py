@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 
 from src.db.main import get_session
 from .services import OrderService
-from .schema import BussiessTrends, OrderResponse, SpendingByCustomer
+from .schema import BussiessTrends1, BussiessTrends2, OrderResponse, SpendingByCustomer
 from sqlalchemy.ext.asyncio import AsyncSession
 order_router = APIRouter()
 order_service = OrderService()
@@ -206,20 +206,17 @@ async def repeated_customer_revenue(
     
 
 @order_router.get("/revenue-trends")
-async def revenue_trends(
-    request: Request,
-    session: AsyncSession = Depends(get_session)):
-    trends: BussiessTrends
+async def revenue_trends( request: Request, trends1: BussiessTrends1, trends2: BussiessTrends2, session: AsyncSession = Depends(get_session)):
     """
         you can fetch revenue according to year, month, day
         
     """
 
-    cache_key = f"analytics:revenue_trends"
+    cache_key = f"analytics:revenue_trends:{trends1}:{trends2}"
     cached = await redis_client.get(cache_key)
     if cached:
         return json.loads(cached)
-    result =  await order_service.BussinessRevenueTrends(trends, request, session)
+    result =  await order_service.BussinessRevenueTrends(trends1, trends2, request, session)
     
     await redis_client.set(
         cache_key,

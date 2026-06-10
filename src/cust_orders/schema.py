@@ -21,10 +21,16 @@ class BaseCustomer(BaseModel):
 class CreateCustomer(BaseCustomer):
     pass
 
-class BussiessTrends(str, Enum):
+class BussiessTrends1(str, Enum):
     year = 'year'
-    day = 'day'
+    # day = 'day'
     month = 'month'
+
+class BussiessTrends2(str, Enum):
+    year = None
+    # day = None
+    month = 'month'
+
 
 class SpendingByCustomer(str, Enum):
     desc = 'desc'
