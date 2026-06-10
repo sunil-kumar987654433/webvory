@@ -1,7 +1,11 @@
+from enum import Enum
+
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
+from src.account.schema import CustomerResponse
 
 class BaseCustomer(BaseModel):
     customer_id: str
@@ -17,17 +21,20 @@ class BaseCustomer(BaseModel):
 class CreateCustomer(BaseCustomer):
     pass
 
+class BussiessTrends(str, Enum):
+    year = 'year'
+    day = 'day'
+    month = 'month'
 
-class CustomerResponse(BaseCustomer):
-    user_id: int
-    user_key: uuid.UUID
-    user_type: str
-    is_active: bool
-    is_verified: bool
-    is_superuser: bool
-    created_at: datetime
-    updated_at: datetime
-    hashed_password: str = Field(exclude=True)
+class SpendingByCustomer(str, Enum):
+    desc = 'desc'
+    asc = 'asc'
+
+
+
+class OrderResponse(BaseCustomer):
+    max_purchasing: Decimal
+    customer: CustomerResponse
 
     model_config = ConfigDict(
         from_attributes=True

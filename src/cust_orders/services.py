@@ -2,50 +2,261 @@ from datetime import datetime, timedelta, timezone
 import uuid
 import time
 from faker import Faker
+
+from src.cust_orders.schema import BussiessTrends, SpendingByCustomer
 fake = Faker('en_IN')
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, insert, func
+from sqlalchemy import select, or_, and_, insert, func, update, bindparam, text, asc
 from threading import Thread
-
-from .models import Customer
-from src.account.schema import CreateCustomer
-from fastapi import HTTPException, status, Depends
+from src.account.models import Customer
+from .models import Order, OrderStatus
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import EmailStr
 from src.config import Config
 import logging
+import secrets, random
+from decimal import Decimal, ROUND_HALF_UP
 
-class CustomerService:
+
+class OrderService:
     BATCH_SIZE = 5000
+
+    async def PurchaseOrdersSpends(self, request: Request, spending_type: SpendingByCustomer, page: int, page_size: int, session: AsyncSession):
+        order = "desc" if spending_type == SpendingByCustomer.desc else "asc"
+        query = text(
+            f"""
+        select sum(o.amount) as max_purchasing, c.email, c.full_name , c.contact_number from orders o join customers c on o.customer_uid=c.user_key group by c.email, c.contact_number, c.full_name order by max_purchasing {order} LIMIT :limit OFFSET :offset;
+        """
+        )
+        offset = (page - 1) * page_size
+        
+        result = await session.execute(query, {'limit': page_size, 'offset': offset})
+        current_url = str(request.url)
+        current_path = str(request.url).split("?")[0]
+        
+
+        return {
+            
+            "current_url": current_url,
+            "next_page": f"{current_path}?spending_type={order}&page={page + 1}&page_size={page_size}" ,
+            "last_page": f"{current_path}?spending_type={order}&page={page - 1}&page_size={page_size}" if page > 1 else  current_url,
+            "data": result.mappings().all()
+        }
+
+
+    async def BussinessRevenueTrends(self, trends: BussiessTrends, request, session):
+        query  = text("""
+            select sum(amount) from orders
+        """)
+    async def RepeatedCusRevenue(self, request, session):
+        query = text("""
+            select COALESCE(sum(user_total_purchasing), 0.00), COALESCE(sum(total_repeated_cust), 0)  from (select sum(amount) as user_total_purchasing, customer_uid, count(customer_uid) as total_repeated_cust, count(order_id) from orders group by customer_uid having count(order_id) > 1) as subquery
+                     """)
+        result = await session.execute(query)
+        revenue, total_repeated_cust = result.one()
+        
+        print(revenue, total_repeated_cust)
+        return JSONResponse(
+            content= {
+                "Repeated_Revenue": round(revenue.quantize(Decimal("0.01"))),
+                "Repeated_customer": int(total_repeated_cust)
+            },
+            status_code=status.HTTP_200_OK
+        )
+
+
+    async def FetchAverageOrdersAmount(self, request, session):
+        result =  (await session.scalar(select(func.avg(Order.amount)))) or Decimal('0.00')
+        return result.quantize(Decimal("0.01"))
+    
+    async def FetchTotalOrdersRefund(self, request, session):
+        result =  (await session.scalar(select(func.sum(Order.amount)).where(Order.status == OrderStatus.refunded))) or Decimal('0.00')
+        return result.quantize(Decimal("0.01"))
+    async def FetchNetOrdersRevenue(self, request, session):
+        result =  (await session.scalar(select(func.sum(Order.amount- Order.refund_amount)))) or Decimal('0.00')
+        return result.quantize(Decimal("0.01"))
+
+    async def FetchTotalOrdersRevenue(self, request, session):
+        result =  (await session.scalar(select(func.sum(Order.amount)))) or Decimal('0.00')
+        return result.quantize(Decimal("0.01"))
+    
+    async def FetchTotalOrders(self, request, session):
+        return (await session.scalar(select(func.count(Order.order_id)))) or 0
+    
+    async def FetchAllOrders(self, request, page, page_size, session):
+        current_url = str(request.url)
+        current_path = str(request.url).split("?")[0]
+        query = text("""
+                     select count(*) from orders
+                     """)
+        total_orders = await session.scalar(query)
+        offset = (page - 1) * page_size
+        stmt = select(Order).order_by(asc("order_id")).limit(page_size).offset(offset)
+        result = await session.execute(stmt)
+        return {
+            "total": total_orders,
+            "current_url": current_url,
+            "next_page": f"{current_path}?page={page + 1}&page_size={page_size}" ,
+            "last_page": f"{current_path}?page={page - 1}&page_size={page_size}" if page > 1 else  current_url,
+            "data": result.scalars().all()
+        }
     
 
+    async def FetchAllCancelOrdersDetail(self,request: Request, page: int, page_size: int, session: AsyncSession):
+        current_url = str(request.url)
+        current_path = str(request.url).split("?")[0]
+        query = text("""
+                     select count(*) from orders where status= :status
+                     """)
+        total_cancel_orders = await session.scalar(query, {"status": 'refunded'})
+        offset = (page - 1) * page_size
+        # query1 = text("""
+        #     select * from orders 
+        #     LIMIT :page_size 
+        #     OFFSET :offset 
+        # """)
+        # record = await session.execute(query1, {"page_size": page_size, 'offset': offset })
+        # return record.fetchall()
+        stmt = select(Order).where(Order.status == OrderStatus.refunded).order_by(asc("order_id")).limit(page_size).offset(offset)
+        result = (await session.execute(stmt)) or None
+        if result:
+            return {
+                "total": total_cancel_orders,
+                "current_url": current_url,
+                "next_page": f"{current_path}?page={page + 1}&page_size={page_size}" ,
+                "last_page": f"{current_path}?page={page - 1}&page_size={page_size}" if page > 1 else  current_url,
+                "data": result.scalars().all()
+            }
+        return JSONResponse(
+            content="Till now no order exist that is cancled",
+            status_code=status.HTTP_200_OK
+        )
+    
+    async def CancelOrderGenerateRefund(
+        self,
+        session: AsyncSession,
+    ):
+        t1 = time.time()
+        total_order = await session.scalar(
+            select(func.count(Order.order_id))
+        )
+        if total_order == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No orders found.",
+            )
+        result = await session.execute(
+            select(
+                Order.order_id,
+                Order.amount,
+                Order.created_at,
+            ).where(
+                Order.status == OrderStatus.success
+            )
+        )
+
+        all_orders = result.all()
+        if len(all_orders) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No successful orders found.",
+            )
+        refund_count = min(200000, len(all_orders))
+        selected_orders = random.sample(
+            all_orders,
+            refund_count,
+        )
+        for batch_start in range(
+            0,
+            refund_count,
+            self.BATCH_SIZE,
+        ):
+            batch = selected_orders[
+                batch_start:
+                batch_start + self.BATCH_SIZE
+            ]
+            updates = []
+            for order_id, amount, created_at in batch:
+                refunded_at = created_at + timedelta(
+                    days=random.randint(0, 7),
+                    hours=random.randint(0, 23),
+                    minutes=random.randint(0, 59),
+                )
+                updates.append(
+                    {
+                        "order_id": order_id,
+                        "refund_amount": amount,
+                        "status": OrderStatus.refunded,
+                        "refunded_at": refunded_at,
+                        "updated_at": refunded_at,
+                    }
+                )
+            try:
+                await session.run_sync(
+                    lambda sync_session: sync_session.bulk_update_mappings(
+                        Order,
+                        updates,
+                    )
+                )
+                await session.commit()
+                print(
+                    f"Updated {batch_start + len(batch)} orders"
+                )
+            except Exception as e:
+                await session.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=str(e),
+                )
+        total_time = time.time() - t1
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "detail": "Refund orders generated successfully.",
+                "updated_orders": refund_count,
+                "time_taken": f"{total_time:.2f} seconds",
+            },
+        )
             
 
-    async def CreateNewUser(self, session: AsyncSession):
+    async def CreateOrder(self, session: AsyncSession):
         t1 = time.time()
         c=0
-        total_customer = await session.scalar(select(func.count(Customer.user_id)))
-        if total_customer == 0:
-            for batch_start in range(0, 100000, CustomerService.BATCH_SIZE):
-                t2 = time.time()
-
-                customers = []
-                for i in range(batch_start, batch_start + CustomerService.BATCH_SIZE):
-                    customers.append(
+        total_order = await session.scalar(select(func.count(Order.order_id)))
+        if total_order < 100:
+            
+            all_customers = await session.execute(select(Customer.user_key, Customer.created_at))
+            
+            customer_details = all_customers.all()
+            if len(customer_details) == 0:
+                raise HTTPException(
+                    detail='Customer not exist',
+                    status_code=status.HTTP_403_FORBIDDEN
+                )
+            for batch_start in range(0, 1000000, OrderService.BATCH_SIZE):
+                orders = []
+                for i in range(batch_start, batch_start + OrderService.BATCH_SIZE):
+                    customer_uid, cust_created_date = random.choice(customer_details)
+                    order_created_at = cust_created_date + timedelta(
+                        days=random.randint(0, 600),
+                        hours=random.randint(0, 23),
+                        minutes=random.randint(0, 59)
+                    )
+                    orders.append(
                         {
-                            "customer_id": f"CUST{i:06d}",
-                            "email": fake.unique.email(),
-                            "full_name": fake.name(),
-                            "contact_number": fake.unique.numerify(text="9#########"),
-                            "full_address": fake.address(),
-                            "state": fake.state(),
-                            "pin_code": fake.postcode(),
+                            "payment_id": f"ODR{secrets.token_hex(16)}{i:06d}",
+                            'customer_uid': customer_uid,
+                            "amount": random.randint(1000, 10000),
+                            "status": OrderStatus.success,
+                            'created_at': order_created_at,
+                            "updated_at": order_created_at
                         }
                     )
                 try:
-                    await session.execute(insert(Customer), customers)
+                    await session.execute(insert(Order), orders)
                     await session.commit()
-                    print(f"Inserted {batch_start + len(customers)} customers")
+                    print(f"Inserted {batch_start + len(orders)} orders")
                 except Exception as e:
                     await session.rollback()
                     raise HTTPException(
@@ -53,56 +264,19 @@ class CustomerService:
                         status_code=status.HTTP_403_FORBIDDEN
                     )
                 finally:
-                    t3 = time.time()
-                    c += 1
-                    # print(f"total time consumes after each 5000 data store: {t3-t2:.2f} seconds", )
-                    if c==20:
-                        print(f"total time taken in all data store: {time.time()-t1:.2f} seconds")
-                        return JSONResponse(
-                            content="All customer data successfully starage.",
-                            status_code=status.HTTP_201_CREATED
-                        )
-                    
+                    pass
+                    # print(f"total time consume for 5000 order created: {t3-t2:.2f} seconds", )
 
-    async def CreateNewCustomerOrder(self, session: AsyncSession):
-        pass
-        # t1 = time.time()
-        # c=0
-        # total_customer_order = await session.scalar(select(func.count(Order.order_id)))
-        # if total_customer_order == 0:
-        #     for batch_start in range(0, 100000, CustomerService.BATCH_SIZE):
-        #         t2 = time.time()
+            t4 = time.time()-t1
+            print(f"total time taken in all data store: {t4:.2f} seconds")
+            return JSONResponse(
+                content={'detail': "All order successfully starage.",
+                            'time_taken_in_order_create': f"{t4:.2f} seconds"
+                            },
+                status_code=status.HTTP_201_CREATED
+            )
 
-        #         customers = []
-        #         for i in range(batch_start, batch_start + CustomerService.BATCH_SIZE):
-        #             customers.append(
-        #                 {
-        #                     "customer_id": f"CUST{i:06d}",
-        #                     "email": fake.unique.email(),
-        #                     "full_name": fake.name(),
-        #                     "contact_number": fake.unique.numerify(text="9#########"),
-        #                     "full_address": fake.address(),
-        #                     "state": fake.state(),
-        #                     "pin_code": fake.postcode(),
-        #                 }
-        #             )
-        #         try:
-        #             await session.execute(insert(Customer), customers)
-        #             await session.commit()
-        #             print(f"Inserted {batch_start + len(customers)} customers")
-        #         except Exception as e:
-        #             await session.rollback()
-        #             raise HTTPException(
-        #                 detail=f"error: {str(e)}",
-        #                 status_code=status.HTTP_403_FORBIDDEN
-        #             )
-        #         finally:
-        #             t3 = time.time()
-        #             c += 1
-        #             # print(f"total time consumes after each 5000 data store: {t3-t2:.2f} seconds", )
-        #             if c==20:
-        #                 print(f"total time taken in all data store: {time.time()-t1:.2f} seconds")
-        #                 return JSONResponse(
-        #                     content="All customer data successfully starage.",
-        #                     status_code=status.HTTP_201_CREATED
-        #                 )
+        return JSONResponse(
+            content="All Order record already exist.",
+            status_code=status.HTTP_403_FORBIDDEN
+        )       

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from src.account import models as account_models
 from src.account.routs import account_router
-
+from src.cust_orders.routs import order_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("start server...")
@@ -21,4 +21,10 @@ app.include_router(
     router=account_router,
     prefix="/account",
     tags=['account']
+)
+
+app.include_router(
+    router=order_router,
+    prefix="/order",
+    tags=['order']
 )
