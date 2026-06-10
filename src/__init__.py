@@ -3,10 +3,16 @@ from contextlib import asynccontextmanager
 from src.account import models as account_models
 from src.account.routs import account_router
 from src.cust_orders.routs import order_router
+from src.db.main import engine
+from src.redis import redis_client
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("start server...")
     yield
+    engine.dispose()
+    await redis_client.aclose()
     print("end server...")
 
 version='v1'

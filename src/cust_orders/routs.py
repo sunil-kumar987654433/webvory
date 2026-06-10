@@ -1,3 +1,5 @@
+import json
+from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 
 from src.db.main import get_session
@@ -6,16 +8,23 @@ from .schema import BussiessTrends, OrderResponse, SpendingByCustomer
 from sqlalchemy.ext.asyncio import AsyncSession
 order_router = APIRouter()
 order_service = OrderService()
+from src.redis import redis_client
 
 import uuid
 
 @order_router.post("/generate-order")
 async def generate_order( session: AsyncSession = Depends(get_session)):
+    """
+        Create/Generate new all order
+    """
     return await order_service.CreateOrder(session)
 
 @order_router.get("/cancel-order")
 async def cancel_order( session: AsyncSession = Depends(get_session)):
-    return await order_service.CancelOrderGenerateRefund(session)
+    """
+    cancel 200000 order
+    """
+    return await order_service.CancelOrderGenerateRefund(session)           
 
 @order_router.get("/view-cancel-order")
 async def fetch_all_cancel_order(
@@ -24,9 +33,23 @@ async def fetch_all_cancel_order(
     page_size: int = Query(ge=1, default=100),
     session: AsyncSession = Depends(get_session)):
     """
-        you can view here refunded order
+        you can view here refunded order detail,
+        redis cache expired in 60 second
     """
-    return await order_service.FetchAllCancelOrdersDetail(request, page, page_size, session)
+    cache_key = f"analytics:cancel_order:{page}:{page_size}"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    result =  await order_service.FetchAllCancelOrdersDetail(request, page, page_size, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
+    
+    
 
 
 @order_router.get("/view-all-order")
@@ -36,48 +59,105 @@ async def fetch_all_order(
     page_size: int = Query(ge=1, default=100),
     session: AsyncSession = Depends(get_session)):
     """
-        you can fetch here all order
+        you can fetch here all order,
+        redis cache used and redis key, data expired in 60 seconds
     """
-    return await order_service.FetchAllOrders(request, page, page_size, session)
+    cache_key = f"analytics:fetch_all_order:{page}:{page_size}"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    result =  await order_service.FetchAllOrders(request, page, page_size, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
+
 
 @order_router.get("/view-total-number-of-order")
 async def fetch_total_number_of_order(
     request: Request,
     session: AsyncSession = Depends(get_session)):
     """
-        you can fetch total numbers order
+        you can fetch total numbers order,
+        redis cache used and redis key, data expired in 60 seconds
     """
-    return await order_service.FetchTotalOrders(request, session)
+    cache_key = f"analytics:fetch_total_number_of_order"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    result =  await order_service.FetchTotalOrders(request, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
 
 @order_router.get("/view-total-revenue")
-async def fetch_total_revenue(
+async def view_total_revenue(
     request: Request,
     session: AsyncSession = Depends(get_session)):
     """
         you can fetch total revenue
+        redis cache used and redis key, data expired in 60 seconds
     """
-    return await order_service.FetchTotalOrdersRevenue(request, session)
+    cache_key = f"analytics:view_total_revenue"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    result =  await order_service.FetchTotalOrdersRevenue(request, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
 @order_router.get("/view-net-revenue")
-async def fetch_total_revenue(
+async def fetch_net_revenue(
     request: Request,
     session: AsyncSession = Depends(get_session)):
     """
         you can fetch net revenue
-        net_revenue = amount_order - refund
+        net_revenue = amount_order - refund,
+        redis based cache
     """
-    return await order_service.FetchNetOrdersRevenue(request, session)
+    cache_key = f"analytics:fetch_net_revenue"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    
+    result =  await order_service.FetchNetOrdersRevenue(request, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
 @order_router.get("/view-total-refund")
 async def fetch_total_refund(
     request: Request,
     session: AsyncSession = Depends(get_session)):
     """
-        you can fetch total refund after cancled order
-        
+        you can fetch total refund after cancled order,
+        redis cache used , cache expired after 60 seconds    
     """
-    return await order_service.FetchTotalOrdersRefund(request, session)
+    cache_key = f"analytics:fetch_total_refund"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    
+    result =  await order_service.FetchTotalOrdersRefund(request, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
 
 @order_router.get("/average-order-amount")
@@ -88,7 +168,18 @@ async def average_order_amount(
         you can fetch average order amount
         
     """
-    return await order_service.FetchAverageOrdersAmount(request, session)
+    cache_key = f"analytics:average_order_amount"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    
+    result =  await order_service.FetchAverageOrdersAmount(request, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
 
 @order_router.get("/repeated-customer-revenue")
@@ -99,8 +190,20 @@ async def repeated_customer_revenue(
         you can fetch average order amount
         
     """
-    return await order_service.RepeatedCusRevenue(request, session)
+    cache_key = f"analytics:repeated_customer_revenue"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    
+    result = await order_service.RepeatedCusRevenue(request, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
+    
 
 @order_router.get("/revenue-trends")
 async def revenue_trends(
@@ -111,7 +214,19 @@ async def revenue_trends(
         you can fetch revenue according to year, month, day
         
     """
-    return await order_service.BussinessRevenueTrends(trends, request, session)
+
+    cache_key = f"analytics:revenue_trends"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    result =  await order_service.BussinessRevenueTrends(trends, request, session)
+    
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
 
 
 @order_router.get("/top-customer-spending")
@@ -124,4 +239,14 @@ async def top_customer_spending(
     """
         you can fetch here all order
     """
-    return await order_service.PurchaseOrdersSpends(request, spending_type, page, page_size, session)
+    cache_key = f"analytics:top_customer_spending:{page}:{page_size}:{spending_type}"
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    result =  await order_service.PurchaseOrdersSpends(request, spending_type, page, page_size, session)
+    await redis_client.set(
+        cache_key,
+        json.dumps(jsonable_encoder(result)),
+        ex=60
+    )
+    return result
