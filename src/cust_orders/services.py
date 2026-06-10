@@ -3,7 +3,7 @@ import uuid
 import time
 from faker import Faker
 
-from src.cust_orders.schema import BussiessTrends, SpendingByCustomer
+from src.cust_orders.schema import BussiessTrends1, BussiessTrends2, SpendingByCustomer
 fake = Faker('en_IN')
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, insert, func, update, bindparam, text, asc
@@ -45,10 +45,33 @@ class OrderService:
         }
 
 
-    async def BussinessRevenueTrends(self, trends: BussiessTrends, request, session):
-        query  = text("""
-            select sum(amount) from orders
-        """)
+    async def BussinessRevenueTrends(self, trends1: BussiessTrends1, trends2: BussiessTrends2, request, session):
+        odr1 = 'year' if trends1 == 'year' else 'month'
+        odr2 = 'month' if trends2 == 'month' else None
+
+        if odr1 == 'year' and odr2 == 'month':
+            query  = text("""
+                          select sum(amount) as total_amount, EXTRACT(YEAR FROM created_at) as year, TO_CHAR(created_at, 'FMMonth') AS month_name, EXTRACT(MONTH FROM created_at) as month_no from orders group by EXTRACT(MONTH FROM created_at), EXTRACT(YEAR FROM created_at), TO_CHAR(created_at, 'FMMonth') order by  EXTRACT(MONTH FROM created_at) asc;
+                           """)
+            
+        elif odr1 == 'month' and odr2 is None:
+            query  = text("""
+                select sum(o.amount) as total_amount, EXTRACT(MONTH FROM created_at) as month_no, TO_CHAR(created_at, 'FMMonth') AS month_name 
+                          from orders o group by EXTRACT(MONTH FROM created_at), TO_CHAR(created_at, 'FMMonth') order by  EXTRACT(MONTH FROM created_at) asc;
+            """)
+        
+        
+        
+        elif odr1 == 'year' and odr2 is None:
+            query  = text("""
+            select sum(amount) as total_amount, EXTRACT(YEAR FROM created_at) as year from orders 
+                          group by EXTRACT(YEAR FROM created_at) order by  EXTRACT(YEAR FROM created_at) asc;
+            """)
+        result = await session.execute(query)
+        return result.mappings().all()
+
+
+
     async def RepeatedCusRevenue(self, request, session):
         query = text("""
             select COALESCE(sum(user_total_purchasing), 0.00), COALESCE(sum(total_repeated_cust), 0)  from (select sum(amount) as user_total_purchasing, customer_uid, count(customer_uid) as total_repeated_cust, count(order_id) from orders group by customer_uid having count(order_id) > 1) as subquery
